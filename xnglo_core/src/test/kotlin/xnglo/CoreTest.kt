@@ -59,6 +59,10 @@ fun main() {
     expectEq("u38 gurmukhi(ਸਤ)", XngloCore.toU38("ਸਤ"), "ਸਤ") // no marks, letters untouched
     expectEq("u38 sinhala passthrough(ආයුබෝවන්)", XngloCore.toU38("ආයුබෝවන්"), "ආයුබෝවන්")
 
+    // anusvara/candrabindu context handling -- repo owner's reported bug:
+    // "N" was showing up literally where xi38 correctly drops/resolves it.
+    expectEq("u38(में स्थित)", XngloCore.toU38("में स्थित"), "मe सथiत")
+
     if (failures > 0) {
         System.err.println("$failures failure(s)")
         kotlin.system.exitProcess(1)

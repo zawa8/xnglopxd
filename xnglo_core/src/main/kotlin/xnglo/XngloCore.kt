@@ -166,21 +166,52 @@ object XngloCore {
         s = composeNukta(s)
 
         val out = StringBuilder()
-        for (c in s) {
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
             val cp = c.toInt()
             val t = tableFor(cp)
             if (t == null || !t.isciiAligned) {
                 out.append(c)
+                i++
                 continue
             }
             val offset = cp - t.base
-            if (offset == t.viramaOffset) continue // drop virama entirely
+            if (offset == t.viramaOffset) {
+                i++
+                continue // drop virama entirely
+            }
+            // Anusvara/candrabindu (offsets 0x01/0x02) are marks whose OWN
+            // xi38 value ("N") only makes sense in context of what
+            // follows -- xi38's postprocessing (xngloIndiaPost's
+            // N$/N(\W)/N(?![kKgG]) rules) handles this on the ROMANIZED
+            // string; toU38() has no such string to regex over (the next
+            // letter is still native-script), so it's done here instead
+            // by peeking at the next codepoint directly: dropped at a
+            // word boundary, "N" before a velar consonant, "m" before a
+            // labial, "n" otherwise.
+            if (offset == 0x01 || offset == 0x02) {
+                val nt = if (i + 1 < s.length) tableFor(s[i + 1].toInt()) else null
+                if (nt == null || nt != t) {
+                    i++
+                    continue // word boundary -> drop
+                }
+                val noffset = s[i + 1].toInt() - nt.base
+                when {
+                    noffset in 0x1A..0x1E -> out.append("N") // velar
+                    noffset in 0x34..0x38 -> out.append("m") // labial
+                    else -> out.append("n")
+                }
+                i++
+                continue
+            }
             val isLetter = offset in 0x04..0x39 || offset in 0x58..0x61 || offset == 0x7F
             if (isLetter) {
                 out.append(c)
             } else {
                 out.append(t.map[offset])
             }
+            i++
         }
         return out.toString()
     }

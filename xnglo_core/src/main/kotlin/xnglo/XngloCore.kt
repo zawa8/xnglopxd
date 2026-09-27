@@ -181,15 +181,22 @@ object XngloCore {
                 i++
                 continue // drop virama entirely
             }
-            // Anusvara/candrabindu (offsets 0x01/0x02) are marks whose OWN
-            // xi38 value ("N") only makes sense in context of what
-            // follows -- xi38's postprocessing (xngloIndiaPost's
-            // N$/N(\W)/N(?![kKgG]) rules) handles this on the ROMANIZED
-            // string; toU38() has no such string to regex over (the next
-            // letter is still native-script), so it's done here instead
-            // by peeking at the next codepoint directly: dropped at a
-            // word boundary, "N" before a velar consonant, "m" before a
-            // labial, "n" otherwise.
+            // Anusvara/candrabindu (offsets 0x01/0x02) are nasalization
+            // marks that -- per standard Sanskrit/Hindi sandhi --
+            // assimilate to a full nasal CONSONANT matching the place of
+            // articulation of whatever follows: ङ before velars, ञ before
+            // palatals, ण before retroflexes, न before dentals (and, by
+            // the repo owner's confirmed example, संस्कृति -> सनसकृति,
+            // also the default for sibilants/semivowels/ह -- anything
+            // else letter-like), म before labials. Only dropped entirely
+            // at a true word boundary (not followed by a same-script
+            // letter at all). xi38's postprocessing collapses the same
+            // way on the romanized string; toU38() has no such string to
+            // regex over (the next letter is still native-script), so
+            // it's resolved here by peeking at the next codepoint's own
+            // offset directly, and emitting the NATIVE nasal letter (not
+            // a Latin one) to match toU38()'s "letters stay native"
+            // design.
             if (offset == 0x01 || offset == 0x02) {
                 val nt = if (i + 1 < s.length) tableFor(s[i + 1].toInt()) else null
                 if (nt == null || nt != t) {
@@ -197,11 +204,19 @@ object XngloCore {
                     continue // word boundary -> drop
                 }
                 val noffset = s[i + 1].toInt() - nt.base
-                when {
-                    noffset in 0x1A..0x1E -> out.append("N") // velar
-                    noffset in 0x34..0x38 -> out.append("m") // labial
-                    else -> out.append("n")
+                val nextIsLetter = noffset in 0x04..0x39 || noffset in 0x58..0x61 || noffset == 0x7F
+                if (!nextIsLetter) {
+                    i++
+                    continue // not actually followed by a letter -> drop
                 }
+                val nasalOffset = when {
+                    noffset in 0x15..0x19 -> 0x19 // velar -> ङ
+                    noffset in 0x1A..0x1E -> 0x1E // palatal -> ञ
+                    noffset in 0x1F..0x23 -> 0x23 // retroflex -> ण
+                    noffset in 0x2A..0x2E -> 0x2E // labial -> म
+                    else -> 0x28                  // dental + everything else -> न
+                }
+                out.append((t.base + nasalOffset).toChar())
                 i++
                 continue
             }

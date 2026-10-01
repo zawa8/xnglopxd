@@ -69,6 +69,18 @@ fun main() {
         "\u0938\u0928\u0938\u0915" + "ri" + "\u0924" + "i"
     )
 
+    // htrlib's test-parts/unicode-india-to-u38.ts testcase1: exercises
+    // the whitelist/normalization rules (ङ/ञ/ण->न, ष->स), independent
+    // vowels other than अ, the और hardcode, danda dropping, and matra
+    // ai's leading-consonant promotion all in one sentence.
+    expectEq(
+        "u38(ऋषि के आश्रम में...)",
+        XngloCore.toU38(
+            "ऋषि के आश्रम में (गंगा) किनारे बैठकर शिष्यों ने वाङ्गमय और चञ्चल मन को एकाग्र करने का पाठ सीखा।"
+        ),
+        "रiसi कe अaशरम मe (गनगa) कiनaरe बयeठकर शiसयo नe वaनगमय और चनचल मन कo eकaगर करनe कa पaठ सiखa"
+    )
+
     if (failures > 0) {
         System.err.println("$failures failure(s)")
         kotlin.system.exitProcess(1)

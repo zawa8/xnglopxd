@@ -159,9 +159,108 @@ object XngloCore {
      * Only supported for the 5 ISCII-aligned scripts -- sinhala passes
      * through untouched (see ScriptTable.isciiAligned).
      */
+    // uh38's actual native-letter alphabet is a SMALL WHITELIST, not "any
+    // devanagari letter" -- confirmed by the repo owner's test data: even
+    // genuine LETTERS (not just anusvara/candrabindu marks) outside this
+    // set get normalized to the nearest letter that IS in it: ङ/ञ/ण -> न
+    // (uh38 only keeps one dental nasal, not one per varga), ष -> स
+    // (only one dental sibilant kept, not both). Independent vowels
+    // other than अ aren't in the alphabet either and get special-cased
+    // below. Devanagari-only so far, same scope as the rest of this
+    // file's u38 logic -- see CLAUDE.md.
+    private val DEVA_LETTER_WHITELIST_OFFSETS = setOf(
+        0x05, // अ
+        0x15, 0x16, 0x17, 0x18, // क ख ग घ
+        0x1a, 0x1b, 0x1c, 0x1d, // च छ ज झ
+        0x1f, 0x20, 0x21, 0x22, // ट ठ ड ढ
+        0x24, 0x25, 0x26, 0x27, 0x28, // त थ द ध न
+        0x2a, 0x2b, 0x2c, 0x2d, 0x2e, // प फ ब भ म
+        0x2f, 0x30, // य र
+        0x32, // ल
+        0x35, // व
+        0x36, // श
+        0x38, // स
+        0x39, // ह
+        0x5c // ड़
+    )
+    private val DEVA_NORMALIZE_OFFSET = mapOf(
+        0x19 to 0x28, // ङ -> न
+        0x1e to 0x28, // ञ -> न
+        0x23 to 0x28, // ण -> न
+        0x37 to 0x38  // ष -> स
+    )
+
+    // Independent vowels other than अ (offset 0x06-0x14): not in the
+    // alphabet, so represented as their xi38 raw value, itself further
+    // split so the CONSONANT-shaped part (if any) still renders native
+    // -- ऋ/ऌ's raw "ri"/"li" become र/ल (native) + i (Latin). Raw values
+    // that were underscore-marked for glide handling (इ ई उ ऊ ए ऐ etc)
+    // are used bare, no अ prefix -- e.g. ए -> "e", not "अe" (glide
+    // marking is about mid-word vs word-initial romanization, moot here
+    // since the letter itself, not a glide consonant, is what's being
+    // represented). Everything else without underscore whose raw
+    // doesn't start with a consonant either (just आ, raw "a") falls
+    // back to "अ" + its raw value. The SAME "raw value starts with a
+    // consonant-key letter -> promote that letter to native, keep the
+    // rest Latin" rule also applies to MARKS below, not just these
+    // independent-vowel letters -- e.g. matra ai (ै, raw "ye") ->
+    // "य" + "e", confirmed by बैठकर -> बयeठकर.
+    private val CONSONANT_FIRST_CHAR_OFFSET = mapOf('r' to 0x30, 'l' to 0x32, 'y' to 0x2f)
+
+    // Promotes a raw xi38 value's leading consonant-key letter (if any)
+    // to its native devanagari character, leaving the rest as-is. Used
+    // both for independent vowels (devaLetterText) and for marks (the
+    // main loop's else branch) -- see CONSONANT_FIRST_CHAR_OFFSET.
+    private fun promoteLeadingConsonant(raw: String, base: Int): String {
+        val first = raw[0]
+        val off = CONSONANT_FIRST_CHAR_OFFSET[first]
+        return if (off != null) (base + off).toChar() + raw.substring(1) else raw
+    }
+
+    private fun devaLetterText(offset: Int, map: Array<String>, base: Int): String {
+        if (offset in DEVA_LETTER_WHITELIST_OFFSETS) {
+            return (base + offset).toChar().toString()
+        }
+        DEVA_NORMALIZE_OFFSET[offset]?.let { return (base + it).toChar().toString() }
+        if (offset in 0x06..0x14) {
+            val raw = map[offset]
+            if (raw.startsWith('_')) return raw.substring(1) // glide-marked -> bare, no अ prefix
+            val promoted = promoteLeadingConsonant(raw, base)
+            if (promoted != raw) return promoted // ऋ/ऌ
+            return (base + 0x05).toChar() + raw // just आ -> अ + raw
+        }
+        // Not in the alphabet and not one of the cases above (e.g. a
+        // rare extra letter) -- fall back to the plain xi38 value
+        // rather than guessing a normalization target with no evidence
+        // for it.
+        return map[offset]
+    }
+
+    // "और" ("and") is common enough, and different enough from what the
+    // general rule above would produce (अ + ौ's raw "ou", neither part
+    // promotable -> "अour"), that it's handled as a literal whole-word
+    // exception instead -- same kind of hardcode as चाहिए elsewhere in
+    // htrlib's history. Matched on word boundaries so it doesn't fire
+    // inside a longer word that happens to contain और as a substring.
+    private val WHOLE_WORD_HARDCODES = mapOf("और" to "और")
+
     fun toU38(input: String): String {
         if (input.isEmpty()) return ""
-        var s = applyConjunctSpecials(input)
+
+        // Whole-word hardcodes are protected with a PUA placeholder
+        // before any other processing, then restored verbatim at the
+        // end, so nothing below can touch them.
+        val hardcodeStash = mutableListOf<String>()
+        var protectedInput = input
+        for ((word, replacement) in WHOLE_WORD_HARDCODES) {
+            val re = Regex("(?<![\u0900-\u097F])" + Regex.escape(word) + "(?![\u0900-\u097F])")
+            protectedInput = re.replace(protectedInput) {
+                hardcodeStash.add(replacement)
+                "${hardcodeStash.size - 1}"
+            }
+        }
+
+        var s = applyConjunctSpecials(protectedInput)
         s = dropMalformedVowelMatra(s)
         s = composeNukta(s)
 
@@ -181,23 +280,24 @@ object XngloCore {
                 i++
                 continue // drop virama entirely
             }
-            // Anusvara/candrabindu (offsets 0x01/0x02) are nasalization
-            // marks that -- per standard Sanskrit/Hindi sandhi --
-            // assimilate to a full nasal CONSONANT matching the place of
-            // articulation of whatever follows: ङ before velars, ञ before
-            // palatals, ण before retroflexes, न before dentals (and, by
-            // the repo owner's confirmed example, संस्कृति -> सनसकृति,
-            // also the default for sibilants/semivowels/ह -- anything
-            // else letter-like), म before labials. Only dropped entirely
-            // at a true word boundary (not followed by a same-script
-            // letter at all). xi38's postprocessing collapses the same
-            // way on the romanized string; toU38() has no such string to
-            // regex over (the next letter is still native-script), so
-            // it's resolved here by peeking at the next codepoint's own
-            // offset directly, and emitting the NATIVE nasal letter (not
-            // a Latin one) to match toU38()'s "letters stay native"
-            // design.
+            val isDevanagari = t.base == BLOCK_BASE
+            if (!isDevanagari) {
+                // Only devanagari has the confirmed whitelist/
+                // normalization rules below -- other scripts fall back
+                // to the old simple letter/mark split until they have
+                // their own confirmed test data.
+                val isLetter = offset in 0x04..0x39 || offset in 0x58..0x61 || offset == 0x7F
+                out.append(if (isLetter) c else t.map[offset])
+                i++
+                continue
+            }
             if (offset == 0x01 || offset == 0x02) {
+                // Anusvara/candrabindu: dropped at a true word boundary
+                // (not followed by a devanagari letter at all), न
+                // otherwise -- except before a labial (प वर्ग), where it
+                // stays म. (Simplified from full 5-way sandhi: ङ/ञ/ण
+                // aren't in uh38's alphabet anyway, confirmed by गंगा's
+                // अनुस्वार, before ग/velar, resolving to न not ङ.)
                 val nt = if (i + 1 < s.length) tableFor(s[i + 1].toInt()) else null
                 if (nt == null || nt != t) {
                     i++
@@ -207,27 +307,39 @@ object XngloCore {
                 val nextIsLetter = noffset in 0x04..0x39 || noffset in 0x58..0x61 || noffset == 0x7F
                 if (!nextIsLetter) {
                     i++
-                    continue // not actually followed by a letter -> drop
+                    continue
                 }
-                val nasalOffset = when {
-                    noffset in 0x15..0x19 -> 0x19 // velar -> ङ
-                    noffset in 0x1A..0x1E -> 0x1E // palatal -> ञ
-                    noffset in 0x1F..0x23 -> 0x23 // retroflex -> ण
-                    noffset in 0x2A..0x2E -> 0x2E // labial -> म
-                    else -> 0x28                  // dental + everything else -> न
-                }
-                out.append((t.base + nasalOffset).toChar())
+                val target = if (noffset in 0x2a..0x2e) 0x2e else 0x28 // labial->म, else->न
+                out.append((t.base + target).toChar())
                 i++
                 continue
             }
-            val isLetter = offset in 0x04..0x39 || offset in 0x58..0x61 || offset == 0x7F
-            if (isLetter) {
-                out.append(c)
+            if (c.isLetter()) {
+                out.append(devaLetterText(offset, t.map, t.base))
+            } else if (offset == 0x64 || offset == 0x65) {
+                // danda / double danda (।॥) -- dropped, not shown as
+                // Latin "."
             } else {
-                out.append(t.map[offset])
+                val raw = t.map[offset]
+                // Vocalic-R/L MATRAS (offsets 0x43, 0x62, 0x63 -- raw
+                // "ri"/"li", same text as the independent ऋ/ऌ LETTERS'
+                // raw value at 0x0b/0x0c) are deliberately NOT promoted,
+                // staying fully Latin -- confirmed by संस्कृति's matra
+                // ऋ staying "ri", not "रi" (contrast with the
+                // independent-letter ऋ in ऋषि, which DOES promote via
+                // devaLetterText).
+                val isVocalicMatra = offset == 0x43 || offset == 0x62 || offset == 0x63
+                out.append(if (isVocalicMatra) raw else promoteLeadingConsonant(raw, t.base))
             }
             i++
         }
-        return out.toString()
+
+        var result = out.toString()
+        if (hardcodeStash.isNotEmpty()) {
+            result = Regex("\uE010([0-9]+)\uE011").replace(result) { m ->
+                hardcodeStash[m.groupValues[1].toInt()]
+            }
+        }
+        return result
     }
 }

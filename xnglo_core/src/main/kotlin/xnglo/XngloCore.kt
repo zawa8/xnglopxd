@@ -91,9 +91,17 @@ object XngloCore {
     // क्ष -> s, ज्ञ -> gy (whole-conjunct special cases, ported as-is,
     // devanagari-specific -- no-op on other scripts' text).
     private fun applyConjunctSpecials(input: String): String {
+        // [\b\s] (backspace-char-or-whitespace), NOT \W: Java/Kotlin
+        // regex's \W (without UNICODE_CHARACTER_CLASS) only recognizes
+        // ASCII word characters, so it would treat every devanagari
+        // char as "non-word" too -- firing after ANY preceding
+        // devanagari letter, not just at a true word boundary.
+        // Confirmed bug report: अक्षुण्ण wrongly simplified to "Asunn"
+        // instead of "Aksunn". [\b\s] matches htrlib's own TS source,
+        // which never had this bug (only the C++/Kotlin ports did).
         var s = input
         s = Regex("^\u0915\u094D\u0937").replace(s, "s")
-        s = Regex("(\\W)\u0915\u094D\u0937").replace(s, "$1s")
+        s = Regex("([\\x08\\s])\u0915\u094D\u0937").replace(s, "$1s")
         s = Regex("\u091C\u094D\u091E").replace(s, "gy")
         return s
     }

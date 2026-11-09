@@ -1,52 +1,49 @@
-name: Release APK
+name: Build APK
 
 on:
   push:
-    tags:
-      - "v*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to release (e.g. v1.0.0)"
-        required: true
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
+          distribution: temurin
           java-version: "17"
-          distribution: "temurin"
 
-      - name: Grant execute permission to gradlew
-        run: chmod +x gradlew
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Build APK
-        run: ./gradlew assembleDebug
+      - name: Generate Gradle wrapper
+        run: gradle wrapper --gradle-version 8.7
 
-      - name: Determine tag
-        id: tag
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "tag=${{GITHUB_REF#refs/tags/}}" >> $GITHUB_OUTPUT
-          fi
+          mkdir -p out
+          cp app/build/outputs/apk/debug/app-debug.apk "out/xnglopxd-debug-${{ github.run_number }}.apk"
 
-      - name: Create GitHub Release
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xnglopxd-debug-apk
+          path: out/*.apk
+
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: "xnglopxd ${{ steps.tag.outputs.tag }}"
-          generate_release_notes: true
-          files: app/build/outputs/apk/debug/*.apk
-          fail_on_unmatched_files: true
+          tag_name: build-${{ github.run_number }}
+          name: "Build ${{ github.run_number }}"
+          files: out/*.apk

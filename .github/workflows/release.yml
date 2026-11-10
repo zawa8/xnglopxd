@@ -21,24 +21,23 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Generate Gradle wrapper
-        run: gradle wrapper --gradle-version 8.7
+      - name: Grant execute permission to gradlew
+        run: chmod +x gradlew
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
 
       - name: Rename APK
         run: |
           mkdir -p out
           cp app/build/outputs/apk/debug/app-debug.apk "out/xnglopxd-debug-${{ github.run_number }}.apk"
 
-      - name: Upload APK as artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: xnglopxd-debug-apk
+          name: xnglopxd-apk
           path: out/*.apk
 
       - name: Publish GitHub Release

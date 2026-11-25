@@ -21,21 +21,25 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Setup Android SDK + local.properties
-        run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" ||           $ANDROID_HOME/cmdline-tools/*/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" || true
+      # ubuntu-latest ships a working Android SDK (ANDROID_HOME preset,
+      # platforms;android-34 and build-tools;34.0.0 already installed),
+      # so no manual sdkmanager step is needed. This matches the
+      # known-good xNglobord workflow.
+
+      - name: Clear dex transform cache
+        run: rm -rf ~/.gradle/caches/8.9/transforms || true
 
       - name: Generate Gradle wrapper
-        run: gradle wrapper --gradle-version 8.9
+        run: gradle wrapper --gradle-version 8.7
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: ./gradlew clean assembleDebug --no-daemon --no-build-cache --stacktrace
 
       - name: Collect APK
         run: |
           mkdir -p out
-          find . -name "*.apk" -path "*/debug/*" | head -1 |             xargs -I{} cp {} "out/xnglopxd-debug-${{ github.run_number }}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             "out/xnglopxd-debug-${{ github.run_number }}.apk"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -44,6 +48,7 @@ jobs:
           path: out/*.apk
 
       - name: Publish GitHub Release
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}

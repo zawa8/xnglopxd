@@ -24,9 +24,10 @@ itself doesn't have verified per-script data for yet either.
   **compiled and run** in this repo's sandbox (see below) -- everything
   under `app/` has not.
 - `app/` -- the actual Android app: Jetpack Compose UI (`MainActivity.kt`
-  has a `NotepadScreen` composable), a font-picker menu (currently just
-  the built-in `FontFamily` choices -- Default/Serif/SansSerif/
-  Monospace/Cursive; no custom `.ttf` bundled yet, see below), and a
+  has a `NotepadScreen` composable), a font-picker menu (lists the 22 xNglo
+  fonts from `LocalFonts.ALL`, loaded from `assets/fonts/` by
+  `FontManager`; the choice is saved in SharedPreferences, same approach
+  as xNglobord's fontpicker), and a
   transliterate menu that runs `XngloCore.toXi38`/`toU38` over the
   current text selection (or the whole document if nothing's selected).
 
@@ -73,10 +74,6 @@ This passes the same assertions as xnglotr's own
 - No launcher icon (`android:icon` removed from `AndroidManifest.xml`
   rather than pointing at a `@mipmap/ic_launcher` that doesn't exist) --
   add one under `app/src/main/res/mipmap-*/` when there's real artwork.
-- Font picker only offers Android's built-in generic font families. To
-  add a real Devanagari-friendly display face: drop a `.ttf`/`.otf`
-  under `app/src/main/res/font/`, declare it as a `FontFamily(Font(R.font.xxx))`,
-  and add it to `FONT_CHOICES` in `MainActivity.kt`.
 - No persistence (open/save files) -- text lives only in the in-memory
   `TextFieldValue` for now.
 - No unit/instrumented tests for `app/` itself (would need Robolectric or

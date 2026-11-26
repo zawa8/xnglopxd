@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextRange
@@ -34,7 +35,7 @@ import androidx.compose.ui.unit.dp
 import xnglo.XngloCore
 
 /**
- * A small notepad screen: type or paste text, pick a display font, and
+ * A small notepad screen: type or paste text, pick an xNglo display font (remembered across launches), and
  * transliterate the current selection (or the whole document if nothing
  * is selected) via [XngloCore] -- htrlib's devanagari xi38/u38 scheme,
  * ported to Kotlin (see xnglo_core module, and CLAUDE.md for what else
@@ -58,23 +59,17 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// A curated set of built-in font families. No custom .ttf files are
-// bundled yet (e.g. a proper Devanagari display face) -- see CLAUDE.md
-// for how to add one under app/src/main/res/font/ and list it here.
-private data class FontChoice(val label: String, val family: FontFamily)
-private val FONT_CHOICES = listOf(
-    FontChoice("Default", FontFamily.Default),
-    FontChoice("Serif", FontFamily.Serif),
-    FontChoice("Sans Serif", FontFamily.SansSerif),
-    FontChoice("Monospace", FontFamily.Monospace),
-    FontChoice("Cursive", FontFamily.Cursive),
-)
+// Font picker options come from LocalFonts.ALL (the xNglo .ttf files in
+// assets/fonts/); the selection is persisted via FontManager.
+private fun familyFor(context: android.content.Context, option: LocalFontOption): FontFamily =
+    FontManager.loadTypeface(context, option)?.let { FontFamily(it) } ?: FontFamily.Default
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotepadScreen() {
     var text by remember { mutableStateOf(TextFieldValue("")) }
-    var fontChoice by remember { mutableStateOf(FONT_CHOICES[0]) }
+    val context = LocalContext.current
+    var selectedFont by remember { mutableStateOf(FontManager.getSelectedOption(context)) }
     var fontMenuOpen by remember { mutableStateOf(false) }
     var transliterateMenuOpen by remember { mutableStateOf(false) }
 
@@ -107,11 +102,20 @@ fun NotepadScreen() {
                         Icon(Icons.Filled.FontDownload, contentDescription = "Pick font")
                     }
                     DropdownMenu(expanded = fontMenuOpen, onDismissRequest = { fontMenuOpen = false }) {
-                        FONT_CHOICES.forEach { choice ->
+                        LocalFonts.ALL.forEach { option ->
                             DropdownMenuItem(
-                                text = { Text(choice.label, fontFamily = choice.family) },
+                                text = {
+                                    Text(
+                                        option.displayName,
+                                        fontFamily = familyFor(context, option),
+                                        color = if (option.id == selectedFont.id)
+                                            MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
                                 onClick = {
-                                    fontChoice = choice
+                                    selectedFont = option
+                                    FontManager.setSelectedFontId(context, option.id)
                                     fontMenuOpen = false
                                 }
                             )
@@ -149,7 +153,7 @@ fun NotepadScreen() {
                 value = text,
                 onValueChange = { text = it },
                 modifier = Modifier.fillMaxSize(),
-                textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = fontChoice.family),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = familyFor(context, selectedFont)),
                 keyboardOptions = KeyboardOptions.Default,
             )
         }
